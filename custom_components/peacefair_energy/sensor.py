@@ -1,289 +1,133 @@
+"""
+Sensor platform for the Peacefair Energy Monitor integration.
+
+This platform creates sensors for various measurements from the device.
+"""
+import logging
+from datetime import datetime
+from typing import final
+
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.const import (
     STATE_UNKNOWN,
-    DEVICE_CLASS_VOLTAGE,
-    DEVICE_CLASS_CURRENT,
-    DEVICE_CLASS_POWER,
-    DEVICE_CLASS_ENERGY,
-    DEVICE_CLASS_POWER_FACTOR,
-    ELECTRIC_POTENTIAL_VOLT,
-    ELECTRIC_CURRENT_AMPERE,
-    POWER_WATT,
-    ENERGY_KILO_WATT_HOUR,
-    FREQUENCY_HERTZ
+    UnitOfElectricCurrent,
+    UnitOfElectricPotential,
+    UnitOfEnergy,
+    UnitOfFrequency,
+    UnitOfPower,
 )
-
-from .const import (
-    DOMAIN,
-    COORDINATOR,
-    ENERGY_SENSOR,
-    DEVICE_CLASS_FREQUENCY,
-    VERSION,
-    STORAGE_PATH
-)
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from homeassistant.helpers.entity import Entity
-from homeassistant.util.json import load_json
+from .const import COORDINATOR, DOMAIN, POWER_FACTOR, VERSION # <--- 将 POWER_FACTOR 添加到这里
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.json import save_json
-from typing import final, Final
-import time
-import logging
-import os
-import datetime
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+from .const import COORDINATOR, DOMAIN, VERSION
+from .modbus import ModbusHub
 
 _LOGGER = logging.getLogger(__name__)
 
-
-HPG_SENSORS = {
-    DEVICE_CLASS_VOLTAGE: {
+# Describes the primary sensors that will be created.
+# The keys correspond to the keys in the data dictionary from ModbusHub.
+PEACEFAIR_SENSORS = {
+    UnitOfElectricPotential.VOLT: {
+        "device_class": SensorDeviceClass.VOLTAGE,
         "name": "Voltage",
-        "unit": ELECTRIC_POTENTIAL_VOLT,
-        "state_class": "measurement"
+        "unit": UnitOfElectricPotential.VOLT,
+        "state_class": "measurement",
     },
-    DEVICE_CLASS_CURRENT: {
+    UnitOfElectricCurrent.AMPERE: {
+        "device_class": SensorDeviceClass.CURRENT,
         "name": "Current",
-        "unit": ELECTRIC_CURRENT_AMPERE,
-        "state_class": "measurement"
+        "unit": UnitOfElectricCurrent.AMPERE,
+        "state_class": "measurement",
     },
-    DEVICE_CLASS_POWER: {
+    UnitOfPower.WATT: {
+        "device_class": SensorDeviceClass.POWER,
         "name": "Power",
-        "unit": POWER_WATT,
-        "state_class": "measurement"
+        "unit": UnitOfPower.WATT,
+        "state_class": "measurement",
     },
-    DEVICE_CLASS_ENERGY: {
+    UnitOfEnergy.KILO_WATT_HOUR: {
+        "device_class": SensorDeviceClass.ENERGY,
         "name": "Energy",
-        "unit": ENERGY_KILO_WATT_HOUR,
-        "state_class": "total_increasing"
+        "unit": UnitOfEnergy.KILO_WATT_HOUR,
+        "state_class": "total_increasing",
     },
-    DEVICE_CLASS_POWER_FACTOR: {
+    POWER_FACTOR: {
+        "device_class": SensorDeviceClass.POWER_FACTOR,
         "name": "Power Factor",
-        "state_class": "measurement"
+        "unit": None,  # Power factor is a dimensionless ratio.
+        "state_class": "measurement",
     },
-    DEVICE_CLASS_FREQUENCY: {
-        "name": "Power Frequency",
-        "unit": FREQUENCY_HERTZ,
-        "icon": "hass:current-ac",
-        "state_class": "measurement"
+    UnitOfFrequency.HERTZ: {
+        "device_class": SensorDeviceClass.FREQUENCY,
+        "name": "Frequency",
+        "unit": UnitOfFrequency.HERTZ,
+        "icon": "mdi:current-ac",
+        "state_class": "measurement",
     },
 }
 
-HISTORY_YEAR = "year"
-HISTORY_MONTH = "month"
-HISTORY_WEEK = "week"
-HISTORY_DAY = "day"
-
-HISTORIES = {
-    HISTORY_YEAR: {
-        "history_name": "Energy Consumption Last Year",
-        "real_name": "Energy Consumption This Year",
-    },
-    HISTORY_MONTH: {
-        "history_name": "Energy Consumption Last Month",
-        "real_name": "Energy Consumption This Month",
-    },
-    HISTORY_WEEK: {
-        "history_name": "Energy Consumption Last Week",
-        "real_name": "Energy Consumption This Week",
-    },
-    HISTORY_DAY:{
-        "history_name": "Energy Consumption Yesterday",
-        "real_name": "Energy Consumption Today",
-    }
-}
-ATTR_LAST_RESET: Final = "last_reset"
-ATTR_STATE_CLASS: Final = "state_class"
+ATTR_LAST_RESET: final = "last_reset"
 
 
-async def async_setup_entry(hass, config_entry, async_add_entities):
-    sensors = []
-    coordinator = hass.data[config_entry.entry_id][COORDINATOR]
-    ident = coordinator.host.replace(".", "_")
-    updates = {}
-    os.makedirs(hass.config.path(STORAGE_PATH), exist_ok=True)
-    record_file = hass.config.path(f"{STORAGE_PATH}/{config_entry.entry_id}_state.json")
-    reset_file = hass.config.path(f"{STORAGE_PATH}/{DOMAIN}_reset.json")
-    json_data = load_json(record_file, default={})
-    for history_type in HISTORIES.keys():
-        state = STATE_UNKNOWN
-        if len(json_data) > 0:
-            state = json_data[history_type]["history_state"]
-        _LOGGER.debug(f"Load {history_type} history data {state}")
-        h_sensor = HPGHistorySensor(history_type, DEVICE_CLASS_ENERGY, ident, state)
-        sensors.append(h_sensor)
-        state = STATE_UNKNOWN
-        last_state = STATE_UNKNOWN
-        last_time = 0
-        if len(json_data) > 0:
-            state = json_data[history_type]["real_state"]
-            last_state = json_data["last_state"]
-            last_time = json_data["last_time"]
-        r_sensor = HPGRealSensor(history_type, DEVICE_CLASS_ENERGY, ident, h_sensor, state, last_state, last_time)
-        sensors.append(r_sensor)
-        updates[history_type] = r_sensor.update_state
-    json_data = load_json(reset_file, default={})
-    if len(json_data) > 0:
-        last_reset = json_data.get("last_reset")
-    else:
-        last_reset = 0
-    for sensor_type in HPG_SENSORS.keys():
-        sensor = HPGSensor(coordinator, config_entry.entry_id, sensor_type, ident, updates, last_reset)
-        sensors.append(sensor)
-        if sensor.device_class == sensor_type:
-            if ENERGY_SENSOR not in hass.data[DOMAIN]:
-                hass.data[DOMAIN][ENERGY_SENSOR] = []
-            hass.data[DOMAIN][ENERGY_SENSOR].append(sensor)
+async def async_setup_entry(
+    hass: HomeAssistant, config_entry, async_add_entities: AddEntitiesCallback
+):
+    """Set up the sensor entities."""
+    coordinator: ModbusHub = hass.data[DOMAIN][config_entry.entry_id][COORDINATOR]
+    
+    # Create all the defined sensors.
+    sensors = [
+        PeacefairSensor(coordinator, sensor_type)
+        for sensor_type in coordinator.data
+    ]
     async_add_entities(sensors)
 
 
-class HPGBaseSensor(Entity):
-    def __init__(self, sensor_type, ident):
-        self._state = STATE_UNKNOWN
+class PeacefairSensor(CoordinatorEntity, SensorEntity):
+    """Representation of a Peacefair sensor."""
+
+    def __init__(self, coordinator: ModbusHub, sensor_type: str):
+        """Initialize the sensor."""
+        super().__init__(coordinator)
         self._sensor_type = sensor_type
-        self._device_info = {
-            "identifiers": {(DOMAIN, ident)},
+        self._config = PEACEFAIR_SENSORS[self._sensor_type]
+        self._host_id = coordinator.host.replace(".", "_")
+
+        # Set entity attributes based on the sensor's config.
+        self._attr_name = f"{self._config['name']}"
+        self._attr_native_unit_of_measurement = self._config.get("unit")
+        self._attr_device_class = self._config["device_class"]
+        self._attr_state_class = self._config["state_class"]
+        self._attr_icon = self._config.get("icon")
+        
+        self._attr_unique_id = f"{DOMAIN}_{self._host_id}_{self._sensor_type}"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, self._host_id)},
+            "name": f"Peacefair Energy Monitor ({coordinator.host})",
             "manufacturer": "Peacefair",
             "model": "PZEM-004T",
             "sw_version": VERSION,
-            "name": "Peacefair Energy Monitor"
         }
+        
+        # Specific handling for the energy sensor's last_reset attribute.
+        if self._attr_device_class == SensorDeviceClass.ENERGY:
+            self._attr_last_reset = None # Will be updated on first reset.
 
     @property
-    def state(self):
-        return STATE_UNKNOWN if self._state == STATE_UNKNOWN else round(self._state, 2)
+    def native_value(self):
+        """Return the state of the sensor."""
+        if self.coordinator.data and self._sensor_type in self.coordinator.data:
+            value = self.coordinator.data[self._sensor_type]
+            # Round the value for display purposes.
+            return round(value, 2)
+        return STATE_UNKNOWN
 
     @property
-    def should_poll(self):
-        return False
-
-    @property
-    def device_info(self):
-        return self._device_info
-
-    @property
-    def device_class(self):
-        return self._sensor_type
-
-    @property
-    def unique_id(self):
-        return self._unique_id
-
-    @property
-    def unit_of_measurement(self):
-        return HPG_SENSORS[self._sensor_type].get("unit")
-
-    @property
-    def icon(self):
-        return HPG_SENSORS[self._sensor_type].get("icon")
-
-    @property
-    def state_class(self):
-        return HPG_SENSORS[self._sensor_type].get("state_class")
-
-    @property
-    def capability_attributes(self):
-        return {ATTR_STATE_CLASS: self.state_class} if self.state_class else {}
-
-
-class HPGHistorySensor(HPGBaseSensor):
-    def __init__(self, history_type, sensor_type, ident, state):
-        super().__init__(sensor_type, ident)
-        self._unique_id = f"{DOMAIN}.{ident}_{history_type}_history"
-        self.entity_id = self._unique_id
-        self._history_type = history_type
-        self._state = state
-
-    @property
-    def name(self):
-        return HISTORIES[self._history_type].get("history_name")
-
-    def update_state(self, state):
-        self._state = state
-        self.schedule_update_ha_state()
-
-
-class HPGRealSensor(HPGBaseSensor):
-    def __init__(self, history_type, sensor_type, ident, history_sensor, state, last_state, last_time):
-        super().__init__(sensor_type, ident)
-        self._unique_id = f"{DOMAIN}.{ident}_{history_type}_real"
-        self.entity_id = self._unique_id
-        self._history_sensor = history_sensor
-        self._history_type = history_type
-        self._last_state = last_state
-        self._last_time = last_time
-        self._state = state
-
-    @property
-    def name(self):
-        return HISTORIES[self._history_type].get("real_name")
-
-    def update_state(self, cur_time, state):
-        if state!= STATE_UNKNOWN and self._last_state != STATE_UNKNOWN:
-            differ = state
-            last_time = time.localtime(self._last_time)
-            current_time = time.localtime(cur_time)
-            if state >= self._last_state:
-                differ = round(state - self._last_state, 3)
-            if (self._history_type == HISTORY_DAY and last_time.tm_mday != current_time.tm_mday) \
-                    or (self._history_type == HISTORY_WEEK and last_time.tm_wday != current_time.tm_wday and current_time.tm_wday == 0) \
-                    or (self._history_type == HISTORY_MONTH and last_time.tm_mon != current_time.tm_mon)\
-                    or (self._history_type == HISTORY_YEAR and last_time.tm_year != current_time.tm_year):
-                self._history_sensor.update_state(self._state)
-                self._state = differ
-            elif self._state == STATE_UNKNOWN:
-                self._state = differ
-            else:
-                self._state = self._state + differ
-        self._last_time = cur_time
-        self._last_state = state
-        self.schedule_update_ha_state()
-        return {
-            "history_state": self._history_sensor._state,
-            "real_state": self._state
-        }
-
-
-class HPGSensor(CoordinatorEntity, HPGBaseSensor):
-    def __init__(self, coordinator, entry_id, sensor_type, ident, energy_updates, last_reset):
-        super().__init__(coordinator)
-        HPGBaseSensor.__init__(self, sensor_type, ident)
-        self._unique_id = f"{DOMAIN}.{ident}_{sensor_type}"
-        self.entity_id = self._unique_id
-        self._energy_updates = energy_updates
-        self._last_reset = datetime.datetime.fromtimestamp(last_reset)
-        self._record_file = f"{STORAGE_PATH}/{entry_id}_state.json"
-        self._reset_file = f"{STORAGE_PATH}/{entry_id}_reset.json"
-        if self._sensor_type == DEVICE_CLASS_ENERGY:
-            coordinator.set_update(self.update_state)
-
-    @property
-    def state(self):
-        if self._sensor_type in self.coordinator.data:
-            return round(self.coordinator.data[self._sensor_type], 2)
-        else:
-            return STATE_UNKNOWN
-
-    @property
-    def name(self):
-        return HPG_SENSORS[self._sensor_type].get("name")
-
-    def update_state(self):
-        cur_time = time.time()
-        json_data = {"last_time": cur_time, "last_state": self.state}
-        if self._energy_updates is not None:
-            for real_type in self._energy_updates:
-                json_data[real_type] = self._energy_updates[real_type](cur_time, self.state)
-            save_json(self.hass.config.path(self._record_file), json_data)
-
-    @property
-    def last_reset(self):
-        return self._last_reset if self._sensor_type == DEVICE_CLASS_ENERGY else None
-
-    @final
-    @property
-    def state_attributes(self):
-        return {ATTR_LAST_RESET: self.last_reset.isoformat()} if self._sensor_type == DEVICE_CLASS_ENERGY else {}
-
-    def reset(self):
-        self._last_reset = datetime.datetime.now()
-        json_data = {"last_reset": self._last_reset.timestamp()}
-        _LOGGER.debug(f"Energy reset")
-        save_json(self.hass.config.path(self._reset_file), json_data)
+    def extra_state_attributes(self):
+        """Return the state attributes of the energy sensor."""
+        if self._attr_device_class == SensorDeviceClass.ENERGY and self._attr_last_reset:
+            return {ATTR_LAST_RESET: self._attr_last_reset.isoformat()}
+        return None
