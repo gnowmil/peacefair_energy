@@ -1,12 +1,12 @@
 {
   "domain": "peacefair_energy",
   "name": "Peacefair Energy Monitor",
-  "version": "v0.7.5",
+  "version": "v0.9.0",
   "config_flow": true,
-  "documentation": "https://github.com/georgezhao2010/peacefair_energy",
-  "issue_tracker": "https://github.com/georgezhao2010/peacefair_energy/issues",
+  "documentation": "https://github.com/gnowmil/peacefair_energy",
+  "issue_tracker": "https://github.com/gnowmil/peacefair_energy/issues",
   "iot_class": "local_polling",
   "dependencies": [],
-  "codeowners": ["@georgezhao2010"],
-  "requirements": ["pymodbus"]
+  "codeowners": ["@gnowmil"],
+  "requirements": ["pymodbus>=3.0.0"]
 }

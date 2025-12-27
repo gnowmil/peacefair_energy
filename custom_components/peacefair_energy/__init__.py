@@ -1,8 +1,8 @@
 """
-Peacefair Energy Monitor Custom Component.
+Peacefair Energy Monitor 自定義組件。
 
-A Home Assistant custom component for communicating with Peacefair energy monitors.
-This file has been modernized according to Home Assistant 2024.x+ development specifications.
+用於與 Peacefair 能源監測器通訊的 Home Assistant 自定義組件。
+此文件已根據 Home Assistant 2025.x 開發規範進行了現代化適配。
 """
 import logging
 import os
@@ -13,15 +13,6 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
-
-from .const import (
-    COORDINATOR,
-    DEFAULT_SCAN_INTERVAL,
-    DOMAIN,
-    PROTOCOLS,
-    STORAGE_PATH,
-    UNSUBSCRIBE_LISTENER,  # Corrected constant name
-)
 from homeassistant.const import (
     ATTR_ENTITY_ID,
     CONF_HOST,
@@ -30,28 +21,42 @@ from homeassistant.const import (
     CONF_SCAN_INTERVAL,
     CONF_SLAVE,
     UnitOfEnergy,
+    Platform,
+)
+
+from .const import (
+    COORDINATOR,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+    PROTOCOLS,
+    STORAGE_PATH,
+    UNSUBSCRIBE_LISTENER,
 )
 from .modbus import ModbusHub
 
 _LOGGER = logging.getLogger(__name__)
 
-# Service names and schema definitions
+# 定義平台列表
+PLATFORMS = [Platform.SENSOR]
+
+# 服務名稱和架構定義
 SERVICE_RESET_ENERGY = "reset_energy"
 RESET_ENERGY_SCHEMA = vol.Schema({vol.Required(ATTR_ENTITY_ID): cv.entity_id})
 
 
 async def async_setup(hass: HomeAssistant, hass_config: dict) -> bool:
-    """Set up the top-level DOMAIN for the component."""
+    """設置組件的頂層 DOMAIN。"""
     hass.data.setdefault(DOMAIN, {})
     return True
 
 
 async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
     """
-    Asynchronously set up a config entry (e.g., a Peacefair device).
-
-    This is the core function for loading the component.
+    非同步設置配置條目（例如：Peacefair 設備）。
     """
+    # 關鍵修正: 再次確保 hass.data[DOMAIN] 存在，防止因 setup 時序問題導致的 KeyError
+    hass.data.setdefault(DOMAIN, {})
+
     config = config_entry.data
     options = config_entry.options
 
@@ -61,77 +66,73 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> b
     slave = config[CONF_SLAVE]
     scan_interval = options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
 
-    # Create a coordinator to manage data updates for this device.
+    # 創建協調器來管理此設備的數據更新。
     coordinator = PeacefairCoordinator(hass, protocol, host, port, slave, scan_interval)
 
-    # Store all data related to this config entry in a dedicated dictionary
-    # keyed by its entry_id.
+    # 將與此配置條目相關的所有數據存儲在專用字典中
     hass.data[DOMAIN][config_entry.entry_id] = {
         COORDINATOR: coordinator,
     }
 
-    # First data refresh.
+    # 第一次數據刷新。
     await coordinator.async_config_entry_first_refresh()
 
-    # Forward the config to the sensor platform to create entities.
-    await hass.config_entries.async_forward_entry_setups(config_entry, ["sensor"])
+    # 將配置轉發給感測器平台以創建實體。
+    await hass.config_entries.async_forward_entry_setups(config_entry, PLATFORMS)
 
-    # Listen for configuration updates (e.g., changing scan interval from "Options").
+    # 監聽配置更新。
     unsub = config_entry.add_update_listener(update_listener)
     hass.data[DOMAIN][config_entry.entry_id][UNSUBSCRIBE_LISTENER] = unsub
 
-    # --- Register the reset energy service ---
+    # --- 註冊重置電量服務 ---
     def service_handle(service):
-        """Handle the 'reset_energy' service call."""
-        _LOGGER.debug(f"Handling reset energy service call, target entity: {service.data.get(ATTR_ENTITY_ID)}")
+        """處理 'reset_energy' 服務調用。"""
+        _LOGGER.debug(f"處理重置電量服務調用，目標實體: {service.data.get(ATTR_ENTITY_ID)}")
         coordinator.reset_energy()
 
-    hass.services.async_register(
-        DOMAIN,
-        SERVICE_RESET_ENERGY,
-        service_handle,
-        schema=RESET_ENERGY_SCHEMA,
-    )
+    # 檢查服務是否已註冊，避免重複註冊警告
+    if not hass.services.has_service(DOMAIN, SERVICE_RESET_ENERGY):
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_RESET_ENERGY,
+            service_handle,
+            schema=RESET_ENERGY_SCHEMA,
+        )
 
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
-    """Asynchronously unload a config entry."""
-    # Call `async_forward_entry_unloads` to correctly unload entities.
-    ok = await hass.config_entries.async_forward_entry_unloads(config_entry, ["sensor"])
+    """非同步卸載配置條目。"""
+    ok = await hass.config_entries.async_unload_platforms(config_entry, PLATFORMS)
 
-    # Get the unload listener function from the data structure.
     entry_data = hass.data[DOMAIN].get(config_entry.entry_id, {})
     unsub = entry_data.get(UNSUBSCRIBE_LISTENER)
 
     if unsub:
         unsub()
 
-    # If the platform is successfully unloaded, clean up data and files.
     if ok:
         hass.data[DOMAIN].pop(config_entry.entry_id)
-        if not hass.data[DOMAIN]:  # If it is the last device, clean up the top-level domain.
+        if not hass.data[DOMAIN]:
             hass.data.pop(DOMAIN)
 
-        # Asynchronously perform file I/O operations.
+        # 清理文件操作 (保持同步執行以避免複雜性，但捕獲異常)
         def do_blocking_file_operations():
-            """Perform synchronous file deletion operations."""
-            storage_path = hass.config.path(STORAGE_PATH)
-            record_file = hass.config.path(f"{STORAGE_PATH}/{config_entry.entry_id}_state.json")
-            reset_file = hass.config.path(f"{STORAGE_PATH}/{DOMAIN}_reset.json")
-            
-            _LOGGER.debug(f"Attempting to delete file: {record_file}")
-            if os.path.exists(record_file):
-                os.remove(record_file)
-
-            _LOGGER.debug(f"Attempting to delete file: {reset_file}")
-            if os.path.exists(reset_file):
-                os.remove(reset_file)
-
-            if os.path.exists(storage_path) and not os.listdir(storage_path):
-                _LOGGER.debug(f"Storage directory is empty, deleting: {storage_path}")
-                os.rmdir(storage_path)
+            """執行同步文件刪除操作。"""
+            try:
+                storage_path = hass.config.path(STORAGE_PATH)
+                record_file = hass.config.path(f"{STORAGE_PATH}/{config_entry.entry_id}_state.json")
+                reset_file = hass.config.path(f"{STORAGE_PATH}/{DOMAIN}_reset.json")
+                
+                if os.path.exists(record_file):
+                    os.remove(record_file)
+                if os.path.exists(reset_file):
+                    os.remove(reset_file)
+                if os.path.exists(storage_path) and not os.listdir(storage_path):
+                    os.rmdir(storage_path)
+            except Exception as e:
+                _LOGGER.warning(f"清理文件時發生錯誤: {e}")
 
         await hass.async_add_executor_job(do_blocking_file_operations)
 
@@ -139,21 +140,19 @@ async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> 
 
 
 async def update_listener(hass: HomeAssistant, config_entry: ConfigEntry):
-    """Handle configuration option updates at runtime."""
-    _LOGGER.debug("Configuration update detected, adjusting coordinator...")
+    """在運行時處理配置選項更新。"""
     scan_interval = config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
     
-    # Get the coordinator from the correct location.
-    coordinator = hass.data[DOMAIN][config_entry.entry_id][COORDINATOR]
-    coordinator.update_interval = timedelta(seconds=scan_interval)
-    _LOGGER.debug(f"Coordinator update interval has been set to {scan_interval} seconds")
+    # 增加檢查以防 entry 尚未完全加載
+    if config_entry.entry_id in hass.data[DOMAIN]:
+        coordinator = hass.data[DOMAIN][config_entry.entry_id][COORDINATOR]
+        coordinator.update_interval = timedelta(seconds=scan_interval)
 
 
 class PeacefairCoordinator(DataUpdateCoordinator):
-    """A class to manage data fetching and polling for Peacefair devices."""
+    """用於管理 Peacefair 設備數據獲取和輪詢的類。"""
 
     def __init__(self, hass, protocol, host, port, slave, scan_interval):
-        """Initialize the Coordinator."""
         super().__init__(
             hass,
             _LOGGER,
@@ -166,30 +165,23 @@ class PeacefairCoordinator(DataUpdateCoordinator):
 
     @property
     def host(self):
-        """Return the host address managed by this coordinator."""
         return self._host
 
     def reset_energy(self):
-        """Send the reset energy command to the device."""
-        _LOGGER.info(f"Resetting energy for device {self._host}...")
+        _LOGGER.info(f"正在重置設備 {self._host} 的電量...")
         self._hub.reset_energy()
-        # Immediately update local data to provide instant feedback.
         if self.data:
             self.data[UnitOfEnergy.KILO_WATT_HOUR] = 0.0
             self.async_set_updated_data(self.data)
 
     async def _async_update_data(self):
-        """Asynchronously fetch the latest data from the Modbus device."""
         try:
-            # Use `hass.async_add_executor_job` to run synchronous Modbus I/O operations.
             data_update = await self._hass.async_add_executor_job(self._hub.info_gather)
-            
             if data_update:
-                _LOGGER.debug(f"Got data from {self._host}: {data_update}")
                 return data_update
             
-            _LOGGER.warning(f"Failed to get data from {self._host}, returning empty data.")
-            return self.data # Return old data to prevent entity from becoming unavailable.
+            _LOGGER.warning(f"無法從 {self._host} 獲取數據，返回空數據。")
+            return self.data if self.data else {}
         except Exception as err:
-            _LOGGER.error(f"Error updating data for device {self._host}: {err}")
-            return self.data # Or return old data.
+            _LOGGER.error(f"設備 {self._host} 更新數據時出錯: {err}")
+            return self.data if self.data else {}

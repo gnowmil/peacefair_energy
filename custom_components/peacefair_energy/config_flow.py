@@ -1,4 +1,4 @@
-"""Config flow for the Peacefair Energy Monitor integration."""
+"""Peacefair Energy Monitor 集成的 Config Flow。"""
 import logging
 
 import homeassistant.helpers.config_validation as cv
@@ -13,6 +13,22 @@ from .const import (
     DEFAULT_SLAVE,
     DOMAIN,
     PROTOCOLS,
+    CONF_SUMMER_MONTHS,
+    CONF_SUMMER_TIER1,
+    CONF_SUMMER_TIER2,
+    CONF_NON_SUMMER_TIER1,
+    CONF_NON_SUMMER_TIER2,
+    CONF_PRICE_L1,
+    CONF_PRICE_L2,
+    CONF_PRICE_L3,
+    DEFAULT_SUMMER_MONTHS,
+    DEFAULT_SUMMER_TIER1,
+    DEFAULT_SUMMER_TIER2,
+    DEFAULT_NON_SUMMER_TIER1,
+    DEFAULT_NON_SUMMER_TIER2,
+    DEFAULT_PRICE_L1,
+    DEFAULT_PRICE_L2,
+    DEFAULT_PRICE_L3,
 )
 from homeassistant.const import (
     CONF_HOST,
@@ -26,33 +42,23 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class PeacefairConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for Peacefair Energy Monitor."""
+    """處理 Peacefair Energy Monitor 的配置流程。"""
 
     VERSION = 1
 
     async def async_step_user(self, user_input=None):
-        """Handle the initial step."""
+        """處理初始步驟。"""
         errors = {}
 
         if user_input is not None:
-            # Create a unique ID to prevent duplicate configurations.
             unique_id = f"{user_input[CONF_HOST]}:{user_input[CONF_PORT]}:{user_input[CONF_SLAVE]}"
-            
-            # Set the unique ID and abort if it already exists.
             await self.async_set_unique_id(unique_id)
             self._abort_if_unique_id_configured()
 
-            # NOTE: For a production-quality component, you would add code here
-            # to test the connection to the device with the provided user_input.
-            # If the connection fails, you would set an error and show the form again.
-            # Example: errors["base"] = "cannot_connect"
-
-            # If connection is successful (or not tested), create the entry.
             return self.async_create_entry(
                 title=user_input[CONF_HOST], data=user_input
             )
 
-        # Show the form to the user.
         data_schema = vol.Schema(
             {
                 vol.Required(CONF_PROTOCOL, default=DEFAULT_PROTOCOL): vol.In(
@@ -71,35 +77,48 @@ class PeacefairConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
-        """Get the options flow for this handler."""
+        """獲取選項流程處理器。"""
         return OptionsFlowHandler(config_entry)
 
 
 class OptionsFlowHandler(config_entries.OptionsFlow):
-    """Handle an options flow for the Peacefair integration."""
+    """處理 Peacefair 集成的選項。"""
 
     def __init__(self, config_entry: config_entries.ConfigEntry):
-        """Initialize options flow."""
-        self.config_entry = config_entry
+        """初始化選項流程。"""
+        # 修正: 不設置 self.config_entry，因為在 HA 2024.12+ 它是唯讀屬性
+        # 改為存儲在本地變量 self._config_entry
+        self._config_entry = config_entry
 
     async def async_step_init(self, user_input=None):
-        """Manage the options."""
+        """管理選項。"""
         if user_input is not None:
-            # Update the config entry with the new options.
             return self.async_create_entry(title="", data=user_input)
 
-        # Get the current value for the scan interval, or the default.
-        scan_interval = self.config_entry.options.get(
-            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
-        )
+        # 使用 self._config_entry 獲取選項
+        options = self._config_entry.options
+        scan_interval = options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+        
+        summer_months = options.get(CONF_SUMMER_MONTHS, DEFAULT_SUMMER_MONTHS)
+        summer_t1 = options.get(CONF_SUMMER_TIER1, DEFAULT_SUMMER_TIER1)
+        summer_t2 = options.get(CONF_SUMMER_TIER2, DEFAULT_SUMMER_TIER2)
+        non_summer_t1 = options.get(CONF_NON_SUMMER_TIER1, DEFAULT_NON_SUMMER_TIER1)
+        non_summer_t2 = options.get(CONF_NON_SUMMER_TIER2, DEFAULT_NON_SUMMER_TIER2)
+        price_l1 = options.get(CONF_PRICE_L1, DEFAULT_PRICE_L1)
+        price_l2 = options.get(CONF_PRICE_L2, DEFAULT_PRICE_L2)
+        price_l3 = options.get(CONF_PRICE_L3, DEFAULT_PRICE_L3)
 
-        # Define the schema for the options form.
         options_schema = vol.Schema(
             {
-                vol.Optional(
-                    CONF_SCAN_INTERVAL,
-                    default=scan_interval,
-                ): cv.positive_int,  # Use a standard HA validator for positive integers.
+                vol.Optional(CONF_SCAN_INTERVAL, default=scan_interval): cv.positive_int,
+                vol.Optional(CONF_SUMMER_MONTHS, default=summer_months): str,
+                vol.Optional(CONF_SUMMER_TIER1, default=summer_t1): int,
+                vol.Optional(CONF_SUMMER_TIER2, default=summer_t2): int,
+                vol.Optional(CONF_NON_SUMMER_TIER1, default=non_summer_t1): int,
+                vol.Optional(CONF_NON_SUMMER_TIER2, default=non_summer_t2): int,
+                vol.Optional(CONF_PRICE_L1, default=price_l1): float,
+                vol.Optional(CONF_PRICE_L2, default=price_l2): float,
+                vol.Optional(CONF_PRICE_L3, default=price_l3): float,
             }
         )
 
