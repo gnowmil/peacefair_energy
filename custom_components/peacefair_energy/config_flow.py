@@ -18,17 +18,28 @@ from .const import (
     CONF_SUMMER_TIER2,
     CONF_NON_SUMMER_TIER1,
     CONF_NON_SUMMER_TIER2,
+    CONF_SUMMER_PRICE_L1,
+    CONF_SUMMER_PRICE_L2,
+    CONF_SUMMER_PRICE_L3,
+    CONF_NON_SUMMER_PRICE_L1,
+    CONF_NON_SUMMER_PRICE_L2,
+    CONF_NON_SUMMER_PRICE_L3,
+    # 舊的鍵用於遷移
     CONF_PRICE_L1,
     CONF_PRICE_L2,
     CONF_PRICE_L3,
+    # 默認值
     DEFAULT_SUMMER_MONTHS,
     DEFAULT_SUMMER_TIER1,
     DEFAULT_SUMMER_TIER2,
     DEFAULT_NON_SUMMER_TIER1,
     DEFAULT_NON_SUMMER_TIER2,
-    DEFAULT_PRICE_L1,
-    DEFAULT_PRICE_L2,
-    DEFAULT_PRICE_L3,
+    DEFAULT_SUMMER_PRICE_L1,
+    DEFAULT_SUMMER_PRICE_L2,
+    DEFAULT_SUMMER_PRICE_L3,
+    DEFAULT_NON_SUMMER_PRICE_L1,
+    DEFAULT_NON_SUMMER_PRICE_L2,
+    DEFAULT_NON_SUMMER_PRICE_L3,
 )
 from homeassistant.const import (
     CONF_HOST,
@@ -86,8 +97,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
     def __init__(self, config_entry: config_entries.ConfigEntry):
         """初始化選項流程。"""
-        # 修正: 不設置 self.config_entry，因為在 HA 2024.12+ 它是唯讀屬性
-        # 改為存儲在本地變量 self._config_entry
         self._config_entry = config_entry
 
     async def async_step_init(self, user_input=None):
@@ -95,7 +104,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        # 使用 self._config_entry 獲取選項
         options = self._config_entry.options
         scan_interval = options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
         
@@ -104,9 +112,19 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         summer_t2 = options.get(CONF_SUMMER_TIER2, DEFAULT_SUMMER_TIER2)
         non_summer_t1 = options.get(CONF_NON_SUMMER_TIER1, DEFAULT_NON_SUMMER_TIER1)
         non_summer_t2 = options.get(CONF_NON_SUMMER_TIER2, DEFAULT_NON_SUMMER_TIER2)
-        price_l1 = options.get(CONF_PRICE_L1, DEFAULT_PRICE_L1)
-        price_l2 = options.get(CONF_PRICE_L2, DEFAULT_PRICE_L2)
-        price_l3 = options.get(CONF_PRICE_L3, DEFAULT_PRICE_L3)
+        
+        # 智能遷移：如果沒有新的價格設置，嘗試使用舊的設置，否則使用默認值
+        old_p1 = options.get(CONF_PRICE_L1, DEFAULT_SUMMER_PRICE_L1)
+        old_p2 = options.get(CONF_PRICE_L2, DEFAULT_SUMMER_PRICE_L2)
+        old_p3 = options.get(CONF_PRICE_L3, DEFAULT_SUMMER_PRICE_L3)
+
+        summer_p1 = options.get(CONF_SUMMER_PRICE_L1, old_p1)
+        summer_p2 = options.get(CONF_SUMMER_PRICE_L2, old_p2)
+        summer_p3 = options.get(CONF_SUMMER_PRICE_L3, old_p3)
+
+        non_summer_p1 = options.get(CONF_NON_SUMMER_PRICE_L1, old_p1)
+        non_summer_p2 = options.get(CONF_NON_SUMMER_PRICE_L2, old_p2)
+        non_summer_p3 = options.get(CONF_NON_SUMMER_PRICE_L3, old_p3)
 
         options_schema = vol.Schema(
             {
@@ -116,9 +134,16 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Optional(CONF_SUMMER_TIER2, default=summer_t2): int,
                 vol.Optional(CONF_NON_SUMMER_TIER1, default=non_summer_t1): int,
                 vol.Optional(CONF_NON_SUMMER_TIER2, default=non_summer_t2): int,
-                vol.Optional(CONF_PRICE_L1, default=price_l1): float,
-                vol.Optional(CONF_PRICE_L2, default=price_l2): float,
-                vol.Optional(CONF_PRICE_L3, default=price_l3): float,
+                
+                # 夏季價格
+                vol.Optional(CONF_SUMMER_PRICE_L1, default=summer_p1): float,
+                vol.Optional(CONF_SUMMER_PRICE_L2, default=summer_p2): float,
+                vol.Optional(CONF_SUMMER_PRICE_L3, default=summer_p3): float,
+
+                # 非夏季價格
+                vol.Optional(CONF_NON_SUMMER_PRICE_L1, default=non_summer_p1): float,
+                vol.Optional(CONF_NON_SUMMER_PRICE_L2, default=non_summer_p2): float,
+                vol.Optional(CONF_NON_SUMMER_PRICE_L3, default=non_summer_p3): float,
             }
         )
 

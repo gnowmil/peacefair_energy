@@ -29,17 +29,23 @@ from .const import (
     CONF_SUMMER_TIER2,
     CONF_NON_SUMMER_TIER1,
     CONF_NON_SUMMER_TIER2,
-    CONF_PRICE_L1,
-    CONF_PRICE_L2,
-    CONF_PRICE_L3,
+    CONF_SUMMER_PRICE_L1,
+    CONF_SUMMER_PRICE_L2,
+    CONF_SUMMER_PRICE_L3,
+    CONF_NON_SUMMER_PRICE_L1,
+    CONF_NON_SUMMER_PRICE_L2,
+    CONF_NON_SUMMER_PRICE_L3,
     DEFAULT_SUMMER_MONTHS,
     DEFAULT_SUMMER_TIER1,
     DEFAULT_SUMMER_TIER2,
     DEFAULT_NON_SUMMER_TIER1,
     DEFAULT_NON_SUMMER_TIER2,
-    DEFAULT_PRICE_L1,
-    DEFAULT_PRICE_L2,
-    DEFAULT_PRICE_L3,
+    DEFAULT_SUMMER_PRICE_L1,
+    DEFAULT_SUMMER_PRICE_L2,
+    DEFAULT_SUMMER_PRICE_L3,
+    DEFAULT_NON_SUMMER_PRICE_L1,
+    DEFAULT_NON_SUMMER_PRICE_L2,
+    DEFAULT_NON_SUMMER_PRICE_L3,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -65,8 +71,6 @@ SENSOR_TYPES = {
         "icon": "mdi:power-plug",
     },
     SensorDeviceClass.ENERGY: {
-        # 修正: 改回 "Energy" 以保持實體 ID (sensor.xxx_energy) 與舊版兼容
-        # 解決 energy_cost 變為 unavailable 的問題
         "name": "Energy",
         "unit": UnitOfEnergy.KILO_WATT_HOUR,
         "state_class": SensorStateClass.TOTAL_INCREASING,
@@ -102,10 +106,9 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     monthly_sensor = PeacefairMonthlyEnergy(coordinator, ident, config_entry)
     entities.append(monthly_sensor)
 
-    # 3. 創建階梯電價相關傳感器 (依賴本月電量傳感器)
+    # 3. 創建階梯電價相關傳感器
     entities.append(PeacefairLevelSensor(coordinator, ident, config_entry, monthly_sensor))
     entities.append(PeacefairPriceSensor(coordinator, ident, config_entry, monthly_sensor))
-    # 新增: 本月電費傳感器
     entities.append(PeacefairCostSensor(coordinator, ident, config_entry, monthly_sensor))
 
     async_add_entities(entities)
@@ -231,8 +234,8 @@ class PeacefairCalculatedSensor(CoordinatorEntity, SensorEntity):
     def _options(self):
         return self._config_entry.options
 
-    def _get_limits(self):
-        """獲取當前的階梯限額。"""
+    def _get_season_config(self):
+        """獲取當前季節的配置 (額度與價格)。"""
         now = dt_util.now()
         summer_months_str = self._options.get(CONF_SUMMER_MONTHS, DEFAULT_SUMMER_MONTHS)
         try:
@@ -243,16 +246,32 @@ class PeacefairCalculatedSensor(CoordinatorEntity, SensorEntity):
         is_summer = now.month in summer_months
         
         if is_summer:
-            limit1 = self._options.get(CONF_SUMMER_TIER1, DEFAULT_SUMMER_TIER1)
-            limit2 = self._options.get(CONF_SUMMER_TIER2, DEFAULT_SUMMER_TIER2)
+            limits = (
+                self._options.get(CONF_SUMMER_TIER1, DEFAULT_SUMMER_TIER1),
+                self._options.get(CONF_SUMMER_TIER2, DEFAULT_SUMMER_TIER2)
+            )
+            prices = (
+                self._options.get(CONF_SUMMER_PRICE_L1, DEFAULT_SUMMER_PRICE_L1),
+                self._options.get(CONF_SUMMER_PRICE_L2, DEFAULT_SUMMER_PRICE_L2),
+                self._options.get(CONF_SUMMER_PRICE_L3, DEFAULT_SUMMER_PRICE_L3)
+            )
         else:
-            limit1 = self._options.get(CONF_NON_SUMMER_TIER1, DEFAULT_NON_SUMMER_TIER1)
-            limit2 = self._options.get(CONF_NON_SUMMER_TIER2, DEFAULT_NON_SUMMER_TIER2)
-        return limit1, limit2
+            limits = (
+                self._options.get(CONF_NON_SUMMER_TIER1, DEFAULT_NON_SUMMER_TIER1),
+                self._options.get(CONF_NON_SUMMER_TIER2, DEFAULT_NON_SUMMER_TIER2)
+            )
+            prices = (
+                self._options.get(CONF_NON_SUMMER_PRICE_L1, DEFAULT_NON_SUMMER_PRICE_L1),
+                self._options.get(CONF_NON_SUMMER_PRICE_L2, DEFAULT_NON_SUMMER_PRICE_L2),
+                self._options.get(CONF_NON_SUMMER_PRICE_L3, DEFAULT_NON_SUMMER_PRICE_L3)
+            )
+            
+        return limits, prices
 
     def _get_current_level(self):
         monthly_energy = self._current_month_energy
-        limit1, limit2 = self._get_limits()
+        limits, _ = self._get_season_config()
+        limit1, limit2 = limits
 
         if monthly_energy <= limit1:
             return 1
@@ -292,13 +311,10 @@ class PeacefairPriceSensor(PeacefairCalculatedSensor):
     @property
     def native_value(self):
         level = self._get_current_level()
+        _, prices = self._get_season_config()
         
-        if level == 1:
-            return self._options.get(CONF_PRICE_L1, DEFAULT_PRICE_L1)
-        elif level == 2:
-            return self._options.get(CONF_PRICE_L2, DEFAULT_PRICE_L2)
-        else:
-            return self._options.get(CONF_PRICE_L3, DEFAULT_PRICE_L3)
+        # prices 是 (Level 1, Level 2, Level 3)
+        return prices[level - 1]
 
 
 class PeacefairCostSensor(PeacefairCalculatedSensor):
@@ -316,23 +332,16 @@ class PeacefairCostSensor(PeacefairCalculatedSensor):
     @property
     def native_value(self):
         energy = self._current_month_energy
-        limit1, limit2 = self._get_limits()
-        
-        price1 = self._options.get(CONF_PRICE_L1, DEFAULT_PRICE_L1)
-        price2 = self._options.get(CONF_PRICE_L2, DEFAULT_PRICE_L2)
-        price3 = self._options.get(CONF_PRICE_L3, DEFAULT_PRICE_L3)
+        limits, prices = self._get_season_config()
+        limit1, limit2 = limits
+        price1, price2, price3 = prices
         
         # 階梯計費邏輯
         if energy <= limit1:
-            # 全部在第一檔
             total_cost = energy * price1
         elif energy <= limit2:
-            # 跨越第一檔，進入第二檔
-            # 第一檔滿額 + 第二檔部分
             total_cost = (limit1 * price1) + ((energy - limit1) * price2)
         else:
-            # 跨越第二檔，進入第三檔
-            # 第一檔滿額 + 第二檔滿額 + 第三檔部分
             total_cost = (limit1 * price1) + ((limit2 - limit1) * price2) + ((energy - limit2) * price3)
             
         return round(total_cost, 2)

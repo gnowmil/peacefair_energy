@@ -26,9 +26,14 @@
                     "summer_tier2_limit": "Summer Tier 2 Limit (kWh)",
                     "non_summer_tier1_limit": "Non-Summer Tier 1 Limit (kWh)",
                     "non_summer_tier2_limit": "Non-Summer Tier 2 Limit (kWh)",
-                    "price_level_1": "Level 1 Price (CNY)",
-                    "price_level_2": "Level 2 Price (CNY)",
-                    "price_level_3": "Level 3 Price (CNY)"
+                    
+                    "summer_price_level_1": "Summer Level 1 Price (CNY)",
+                    "summer_price_level_2": "Summer Level 2 Price (CNY)",
+                    "summer_price_level_3": "Summer Level 3 Price (CNY)",
+                    
+                    "non_summer_price_level_1": "Non-Summer Level 1 Price (CNY)",
+                    "non_summer_price_level_2": "Non-Summer Level 2 Price (CNY)",
+                    "non_summer_price_level_3": "Non-Summer Level 3 Price (CNY)"
                 }
             }
         }

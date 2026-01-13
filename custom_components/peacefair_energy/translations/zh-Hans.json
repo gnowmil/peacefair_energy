@@ -9,7 +9,7 @@
                     "protocol": "協議",
                     "host": "地址",
                     "port": "端口",
-                    "slave": "从站编号"
+                    "slave": "從站編號"
                 },
                 "title": "添加新設備"
             }
@@ -26,9 +26,14 @@
                     "summer_tier2_limit": "夏季二檔電量上限 (kWh)",
                     "non_summer_tier1_limit": "非夏季一檔電量上限 (kWh)",
                     "non_summer_tier2_limit": "非夏季二檔電量上限 (kWh)",
-                    "price_level_1": "一檔電價 (CNY)",
-                    "price_level_2": "二檔電價 (CNY)",
-                    "price_level_3": "三檔電價 (CNY)"
+                    
+                    "summer_price_level_1": "夏季一檔電價 (CNY)",
+                    "summer_price_level_2": "夏季二檔電價 (CNY)",
+                    "summer_price_level_3": "夏季三檔電價 (CNY)",
+                    
+                    "non_summer_price_level_1": "非夏季一檔電價 (CNY)",
+                    "non_summer_price_level_2": "非夏季二檔電價 (CNY)",
+                    "non_summer_price_level_3": "非夏季三檔電價 (CNY)"
                 }
             }
         }
